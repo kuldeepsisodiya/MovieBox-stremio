@@ -1,4 +1,4 @@
-
+```yaml
 name: Sync upstream
 
 on:
@@ -12,13 +12,40 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Sync with upstream
+      - name: Sync with upstream (preserve README)
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
+          set -e
+
+          # Save the current README
+          gh api "repos/$REPO/contents/README.md" \
+            --jq '.content' | base64 -d > /tmp/README.md || true
+
+          # Sync fork with upstream
           gh api \
             --method POST \
             "repos/$REPO/merge-upstream" \
             -f branch=main
+
+          # Restore README only if it was changed
+          if [ -f /tmp/README.md ]; then
+            CURRENT_SHA=$(gh api "repos/$REPO/contents/README.md" \
+              --jq '.sha' 2>/dev/null || true)
+
+            CURRENT_CONTENT=$(gh api "repos/$REPO/contents/README.md" \
+              --jq '.content' 2>/dev/null | base64 -d || true)
+
+            if ! cmp -s /tmp/README.md <(printf '%s' "$CURRENT_CONTENT"); then
+              gh api \
+                --method PUT \
+                "repos/$REPO/contents/README.md" \
+                -f message="Preserve fork README during upstream sync" \
+                -f content="$(base64 -w 0 /tmp/README.md)" \
+                -f sha="$CURRENT_SHA"
+            fi
+          fi
+```
